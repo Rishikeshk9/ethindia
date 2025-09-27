@@ -29,22 +29,26 @@ function GameInner() {
     fetch("http://localhost:4000/offer").then(r => r.json()).then(setOffer).catch(() => setOffer(null));
   }, []);
 
-  async function addAnvilNetwork() {
+  async function addAmoyNetwork() {
     if (!window.ethereum) return alert("Install MetaMask");
     try {
       await (window.ethereum as any).request({
         method: "wallet_addEthereumChain",
         params: [
           {
-            chainId: "0x7A69", // 31337
-            chainName: "Anvil Localhost",
-            nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
-            rpcUrls: ["http://127.0.0.1:8545"],
-            blockExplorerUrls: []
+            chainId: "0x13882", // 80002
+            chainName: "Polygon Amoy",
+            nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
+            rpcUrls: ["https://rpc-amoy.polygon.technology"],
+            blockExplorerUrls: ["https://www.oklink.com/amoy"]
           }
         ]
       });
-      alert("Anvil network added to MetaMask");
+      await (window.ethereum as any).request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: "0x13882" }]
+      });
+      alert("Switched to Polygon Amoy in MetaMask");
     } catch (e) {
       console.error(e);
       alert("Failed to add network. Check console.");
@@ -102,7 +106,7 @@ function GameInner() {
         ) : (
           <button onClick={() => disconnect()}>Disconnect</button>
         )}
-        <button onClick={addAnvilNetwork} style={{ marginLeft: 8 }}>Add Anvil to MetaMask</button>
+        <button onClick={addAmoyNetwork} style={{ marginLeft: 8 }}>Switch to Polygon Amoy</button>
       </div>
       <div style={{ marginTop: 16 }}>
         <button onClick={openSession} disabled={!isConnected || status === "opening"}>Open Session (budget 5 USD)</button>
