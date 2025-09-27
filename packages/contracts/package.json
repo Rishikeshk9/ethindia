@@ -7,7 +7,8 @@
     "test": "hardhat test",
     "lint": "echo 'no lint'",
     "dev": "hardhat node",
-    "deploy:local": "hardhat run scripts/deploy.ts --network localhost"
+    "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "deploy:amoy": "hardhat run scripts/deploy-amoy.ts --network amoy"
   },
   "devDependencies": {
     "hardhat": "^2.22.5",

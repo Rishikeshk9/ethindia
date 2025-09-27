@@ -6,7 +6,7 @@ import { formatEther } from "viem";
 import { createPublicClient, createWalletClient, custom, parseEther } from "viem";
 import { foundry } from "viem/chains";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { PAYMENT_SESSION_ADDRESS, PAYMENT_SESSION_ABI } from "../config/contracts";
+import { ADDRESSES, PAYMENT_SESSION_ABI } from "../config/contracts";
 
 const config = createConfig({
   chains: [foundry],
@@ -68,8 +68,10 @@ function GameInner() {
     const [account] = await walletClient.getAddresses();
     setStatus("opening");
     try {
+      const addressToUse = ADDRESSES[foundry.id];
+      if (!addressToUse) throw new Error("Contract address not set for current chain");
       await walletClient.writeContract({
-        address: PAYMENT_SESSION_ADDRESS as `0x${string}`,
+        address: addressToUse as `0x${string}`,
         abi: PAYMENT_SESSION_ABI as any,
         functionName: "open",
         args: [BigInt(5)],
@@ -88,8 +90,10 @@ function GameInner() {
     const [account] = await walletClient.getAddresses();
     setStatus("closing");
     try {
+      const addressToUse = ADDRESSES[foundry.id];
+      if (!addressToUse) throw new Error("Contract address not set for current chain");
       await walletClient.writeContract({
-        address: PAYMENT_SESSION_ADDRESS as `0x${string}`,
+        address: addressToUse as `0x${string}`,
         abi: PAYMENT_SESSION_ABI as any,
         functionName: "close",
         args: [],
@@ -102,11 +106,12 @@ function GameInner() {
     }
   }
 
+  const currentAddress = ADDRESSES[foundry.id];
   return (
     <main style={{ padding: 24 }}>
       <h1>Match402</h1>
       <p>Pay-per-minute multiplayer with agentic micro-payments.</p>
-      <p>Local PaymentSession: <code>{PAYMENT_SESSION_ADDRESS}</code></p>
+      <p>Local PaymentSession: <code>{currentAddress ?? "(not configured)"}</code></p>
       <div style={{ marginTop: 16 }}>
         {!isConnected ? (
           <button onClick={() => connect({ connector: connectors[0] })} disabled={isPending}>Connect Wallet</button>
@@ -116,7 +121,7 @@ function GameInner() {
         <button onClick={addAmoyNetwork} style={{ marginLeft: 8 }}>Switch to Polygon Amoy</button>
       </div>
       <div style={{ marginTop: 16 }}>
-        <button onClick={openSession} disabled={!isConnected || status === "opening"}>Open Session (budget 5 USD)</button>
+        <button onClick={openSession} disabled={!isConnected || status === "opening" || !currentAddress}>Open Session (budget 5 USD)</button>
         <button onClick={closeSession} disabled={!isConnected || status === "closing"} style={{ marginLeft: 8 }}>Close Session</button>
         <div>Status: {status}</div>
       </div>
