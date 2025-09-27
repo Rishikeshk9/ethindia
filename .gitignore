@@ -1,0 +1,24 @@
+# Node/JS
+node_modules/
+dist/
+build/
+.turbo/
+.next/
+out/
+
+# Env & OS
+.env
+.env.*
+.DS_Store
+
+# Testing
+coverage/
+
+# Hardhat/solidity
+artifacts/
+cache/
+typechain-types/
+
+# TS
+tsconfig.tsbuildinfo
+
