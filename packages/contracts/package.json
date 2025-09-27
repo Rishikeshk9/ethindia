@@ -14,7 +14,8 @@
     "hardhat": "^2.22.5",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "typescript": "^5.4.0",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "dotenv": "^16.4.5"
   }
 }
 

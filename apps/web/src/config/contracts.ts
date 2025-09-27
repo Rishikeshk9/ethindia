@@ -1,6 +1,6 @@
 export const ADDRESSES: Record<number, string | null> = {
   31337: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512", // Anvil
-  80002: null // fill after Amoy deploy
+  80002: "0x06228469bf945eDC402e4715c2FF76b7532bb144" // Amoy
 };
 
 export const PAYMENT_SESSION_ABI = [
