@@ -1,17 +1,18 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { createConfig, http, useAccount, useConnect, useDisconnect, WagmiConfig } from "wagmi";
+import { createConfig, http, useAccount, useChainId, useConnect, useDisconnect, WagmiConfig } from "wagmi";
 import { injected } from "wagmi/connectors";
 import { formatEther } from "viem";
 import { createPublicClient, createWalletClient, custom, parseEther } from "viem";
-import { foundry } from "viem/chains";
+import { foundry, polygonAmoy } from "viem/chains";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ADDRESSES, PAYMENT_SESSION_ABI } from "../config/contracts";
 
 const config = createConfig({
-  chains: [foundry],
+  chains: [foundry, polygonAmoy],
   transports: {
-    [foundry.id]: http("http://127.0.0.1:8545")
+    [foundry.id]: http("http://127.0.0.1:8545"),
+    [polygonAmoy.id]: http("https://rpc-amoy.polygon.technology")
   },
   connectors: [injected()] as any
 });
@@ -20,10 +21,12 @@ function GameInner() {
   const { connect, connectors, isPending } = useConnect();
   const { disconnect } = useDisconnect();
   const { address, isConnected } = useAccount();
+  const chainId = useChainId();
   const [offer, setOffer] = useState<any>(null);
   const [status, setStatus] = useState<string>("idle");
 
-  const publicClient = useMemo(() => createPublicClient({ chain: foundry, transport: http("http://127.0.0.1:8545") }), []);
+  // derive active contract address by connected chain
+  const currentAddress = useMemo(() => (ADDRESSES as any)[chainId] ?? null, [chainId]);
 
   useEffect(() => {
     fetch("http://localhost:4000/offer").then(r => r.json()).then(setOffer).catch(() => setOffer(null));
@@ -64,11 +67,11 @@ function GameInner() {
 
   async function openSession() {
     if (!window.ethereum) return alert("Install MetaMask");
-    const walletClient = createWalletClient({ chain: foundry, transport: custom(window.ethereum as any) });
+    const walletClient = createWalletClient({ transport: custom(window.ethereum as any) });
     const [account] = await walletClient.getAddresses();
     setStatus("opening");
     try {
-      const addressToUse = ADDRESSES[foundry.id];
+      const addressToUse = currentAddress;
       if (!addressToUse) throw new Error("Contract address not set for current chain");
       await walletClient.writeContract({
         address: addressToUse as `0x${string}`,
@@ -86,11 +89,11 @@ function GameInner() {
 
   async function closeSession() {
     if (!window.ethereum) return;
-    const walletClient = createWalletClient({ chain: foundry, transport: custom(window.ethereum as any) });
+    const walletClient = createWalletClient({ transport: custom(window.ethereum as any) });
     const [account] = await walletClient.getAddresses();
     setStatus("closing");
     try {
-      const addressToUse = ADDRESSES[foundry.id];
+      const addressToUse = currentAddress;
       if (!addressToUse) throw new Error("Contract address not set for current chain");
       await walletClient.writeContract({
         address: addressToUse as `0x${string}`,
@@ -111,7 +114,7 @@ function GameInner() {
     <main style={{ padding: 24 }}>
       <h1>Match402</h1>
       <p>Pay-per-minute multiplayer with agentic micro-payments.</p>
-      <p>Local PaymentSession: <code>{currentAddress ?? "(not configured)"}</code></p>
+      <p>PaymentSession (chain {chainId || "?"}): <code>{currentAddress ?? "(not configured)"}</code></p>
       <div style={{ marginTop: 16 }}>
         {!isConnected ? (
           <button onClick={() => connect({ connector: connectors[0] })} disabled={isPending}>Connect Wallet</button>
