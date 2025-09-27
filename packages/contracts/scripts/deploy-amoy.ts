@@ -6,6 +6,7 @@ async function main() {
   await contract.waitForDeployment();
   const addr = await contract.getAddress();
   console.log("PaymentSession (Amoy) deployed to:", addr);
+  // No constructor args; verification happens via separate step
   try {
     await (ethers as any).run("verify:verify", { address: addr, constructorArguments: [] });
     console.log("Verified PaymentSession at", addr);

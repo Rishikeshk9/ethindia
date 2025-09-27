@@ -2,6 +2,7 @@
   "name": "@ethindia/contracts",
   "version": "0.1.0",
   "private": true,
+  
   "scripts": {
     "build": "hardhat compile",
     "test": "hardhat test",
@@ -12,14 +13,16 @@
     "deploy:mock:local": "hardhat run scripts/deploy-mock.ts --network localhost",
     "deploy:mock:amoy": "hardhat run scripts/deploy-mock.ts --network amoy"
   },
+  "dependencies": {
+    "undici": "^6.19.8"
+  },
   "devDependencies": {
-    "hardhat": "^2.22.5",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "@nomicfoundation/hardhat-verify": "^2.0.0",
-    "typescript": "^5.4.0",
-    "ts-node": "^10.9.2",
+    "@nomicfoundation/hardhat-verify": "^2.1.1",
+    "@openzeppelin/contracts": "^5.0.2",
     "dotenv": "^16.4.5",
-    "@openzeppelin/contracts": "^5.0.2"
+    "hardhat": "^2.26.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
   }
 }
-

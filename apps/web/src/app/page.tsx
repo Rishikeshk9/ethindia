@@ -1,12 +1,12 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createConfig, http, useAccount, useChainId, useConnect, useDisconnect, WagmiConfig } from "wagmi";
 import { injected } from "wagmi/connectors";
 import { formatEther } from "viem";
 import { createPublicClient, createWalletClient, custom, parseEther } from "viem";
 import { foundry, polygonAmoy } from "viem/chains";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ADDRESSES, PAYMENT_SESSION_ABI } from "../config/contracts";
+import { ADDRESSES, PAYMENT_SESSION_ABI, ERC20_ABI, USDC_ADDRESSES } from "../config/contracts";
 
 const config = createConfig({
   chains: [foundry, polygonAmoy],
@@ -24,13 +24,80 @@ function GameInner() {
   const chainId = useChainId();
   const [offer, setOffer] = useState<any>(null);
   const [status, setStatus] = useState<string>("idle");
+  const [spentUsd, setSpentUsd] = useState<number>(0);
+  const tickIdRef = useRef<any>(null);
+  const openedAtMsRef = useRef<number | null>(null);
+  const budgetUsd = 5;
+  const [accountAddr, setAccountAddr] = useState<`0x${string}` | null>(null);
+  const [tokenDecimals, setTokenDecimals] = useState<number>(18);
+  const [tokenUnit, setTokenUnit] = useState<bigint>(BigInt(10) ** BigInt(18));
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   // derive active contract address by connected chain
   const currentAddress = useMemo(() => (ADDRESSES as any)[chainId] ?? null, [chainId]);
+  const activeChain = useMemo(() => (chainId === polygonAmoy.id ? polygonAmoy : foundry), [chainId]);
 
   useEffect(() => {
     fetch("http://localhost:4000/offer").then(r => r.json()).then(setOffer).catch(() => setOffer(null));
+    try {
+      const saved = localStorage.getItem("match402.sessionId");
+      if (saved) setSessionId(saved);
+    } catch {}
   }, []);
+
+  // Resolve token decimals for current chain (used to convert on server ticks)
+  useEffect(() => {
+    (async () => {
+      try {
+        const tokenAddress = (USDC_ADDRESSES as any)[chainId] as `0x${string}` | null;
+        if (!tokenAddress) return;
+        const pc = createPublicClient({ chain: activeChain, transport: custom(window.ethereum as any) });
+        const dec: number = await pc.readContract({ address: tokenAddress, abi: ERC20_ABI as any, functionName: "decimals", args: [] }) as any;
+        setTokenDecimals(dec);
+        setTokenUnit(BigInt(10) ** BigInt(dec));
+      } catch {}
+    })();
+  }, [chainId, activeChain]);
+
+  useEffect(() => {
+    if (!address || !sessionId) return;
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket("ws://localhost:4000");
+      ws.onopen = () => {
+        if (address && sessionId) ws!.send(JSON.stringify({ type: "subscribe", address, sessionId }));
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(String(ev.data));
+          if (msg?.type === "tick") {
+            const spent = BigInt(msg.spent);
+            const usd = Number(spent) / Math.pow(10, tokenDecimals || 18);
+            setSpentUsd(Math.min(budgetUsd, usd));
+            setStatus(msg.active ? "open" : "idle");
+          }
+        } catch {}
+      };
+    } catch {}
+    return () => { try { if (ws && ws.readyState === WebSocket.OPEN) ws.close(); } catch {} };
+  }, [address, tokenDecimals, sessionId]);
+
+  // Hydrate from server snapshot if we have sessionId
+  useEffect(() => {
+    (async () => {
+      if (!address || !sessionId) return;
+      try {
+        const r = await fetch(`http://localhost:4000/session?address=${address}&sessionId=${sessionId}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (j && j.spent) {
+          const usd = Number(BigInt(j.spent)) / Math.pow(10, tokenDecimals || 18);
+          setSpentUsd(Math.min(budgetUsd, usd));
+        }
+        setStatus(j?.active ? "open" : "idle");
+      } catch {}
+    })();
+  }, [address, sessionId, tokenDecimals]);
 
   async function addAmoyNetwork() {
     if (!window.ethereum) return alert("Install MetaMask");
@@ -67,19 +134,56 @@ function GameInner() {
 
   async function openSession() {
     if (!window.ethereum) return alert("Install MetaMask");
-    const walletClient = createWalletClient({ transport: custom(window.ethereum as any) });
+    const walletClient = createWalletClient({ chain: activeChain, transport: custom(window.ethereum as any) });
     const [account] = await walletClient.getAddresses();
+    setAccountAddr(account as `0x${string}`);
     setStatus("opening");
     try {
       const addressToUse = currentAddress;
       if (!addressToUse) throw new Error("Contract address not set for current chain");
+      const tokenAddress = (USDC_ADDRESSES as any)[chainId] as `0x${string}` | null;
+      if (!tokenAddress) throw new Error("Token not configured for this chain");
+
+      // Resolve decimals and compute values (1 token ~= 1 USD for mock USDC)
+      const publicClient = createPublicClient({ chain: activeChain, transport: custom(window.ethereum as any) });
+      const decimals: number = await publicClient.readContract({ address: tokenAddress, abi: ERC20_ABI as any, functionName: "decimals", args: [] }) as any;
+      const unit = BigInt(10) ** BigInt(decimals);
+      const rateUsdPerSecond = offer?.rateUsdPerSecond ?? (offer?.rateUsdPerMinute ? offer.rateUsdPerMinute / 60 : 0.05);
+      const budgetTokens = BigInt(Math.floor(budgetUsd * 1e6)) * (unit / BigInt(1e6));
+      const rateTokensPerSec = BigInt(Math.floor(rateUsdPerSecond * 1e6)) * (unit / BigInt(1e6));
+
+      // Generate sessionId (keccak of address + time)
+      const sid = `0x${crypto.getRandomValues(new Uint8Array(32)).reduce((a,b)=>a+b.toString(16).padStart(2,"0"),"")}` as const;
+      setSessionId(sid);
+      try { localStorage.setItem("match402.sessionId", sid); } catch {}
+
+      // Check allowance
+      const allowanceAbi = [{ "inputs": [{"internalType":"address","name":"owner","type":"address"},{"internalType":"address","name":"spender","type":"address"}], "name":"allowance", "outputs":[{"internalType":"uint256","name":"","type":"uint256"}], "stateMutability":"view", "type":"function" }];
+      const currentAllowance: bigint = await publicClient.readContract({ address: tokenAddress, abi: allowanceAbi as any, functionName: "allowance", args: [account as `0x${string}`, addressToUse as `0x${string}`] }) as any;
+      if (currentAllowance < budgetTokens) {
+        await walletClient.writeContract({
+          address: tokenAddress,
+          abi: ERC20_ABI as any,
+          functionName: "approve",
+          args: [addressToUse as `0x${string}`, budgetTokens],
+          account,
+          chain: activeChain
+        });
+      }
+
+      // 2) Open session with escrow pull and metering
+      const payee = account; // demo: pay to self; replace with game/server wallet as needed
       await walletClient.writeContract({
         address: addressToUse as `0x${string}`,
         abi: PAYMENT_SESSION_ABI as any,
         functionName: "open",
-        args: [BigInt(5)],
-        account
+        args: [sid, tokenAddress, payee, budgetTokens, rateTokensPerSec],
+        account,
+        chain: activeChain
       });
+      setSpentUsd(0);
+      openedAtMsRef.current = Date.now();
+      if (tickIdRef.current) clearInterval(tickIdRef.current);
       setStatus("open");
     } catch (e) {
       console.error(e);
@@ -89,25 +193,54 @@ function GameInner() {
 
   async function closeSession() {
     if (!window.ethereum) return;
-    const walletClient = createWalletClient({ transport: custom(window.ethereum as any) });
+    const walletClient = createWalletClient({ chain: activeChain, transport: custom(window.ethereum as any) });
     const [account] = await walletClient.getAddresses();
     setStatus("closing");
     try {
       const addressToUse = currentAddress;
       if (!addressToUse) throw new Error("Contract address not set for current chain");
+      if (!sessionId) throw new Error("No sessionId");
       await walletClient.writeContract({
         address: addressToUse as `0x${string}`,
         abi: PAYMENT_SESSION_ABI as any,
         functionName: "close",
-        args: [],
-        account
+        args: [sessionId],
+        account,
+        chain: activeChain
       });
       setStatus("closed");
+      if (tickIdRef.current) clearInterval(tickIdRef.current);
+      // final on-chain refresh
+      try {
+        if (accountAddr) {
+          const pc = createPublicClient({ chain: activeChain, transport: custom(window.ethereum as any) });
+          const tokenAddress = (USDC_ADDRESSES as any)[chainId] as `0x${string}` | null;
+          if (tokenAddress) {
+            const decimals: number = await pc.readContract({ address: tokenAddress, abi: ERC20_ABI as any, functionName: "decimals", args: [] }) as any;
+            const unit = BigInt(10) ** BigInt(decimals);
+            const res = await pc.readContract({
+              address: addressToUse as `0x${string}`,
+              abi: PAYMENT_SESSION_ABI as any,
+              functionName: "getAccrued",
+              args: [accountAddr, sessionId]
+            });
+            const [spentTokens] = res as unknown as [bigint, bigint, bigint];
+            const usd = Number(spentTokens) / Number(unit);
+            setSpentUsd(Math.min(budgetUsd, +usd));
+          }
+        }
+      } catch {}
     } catch (e) {
       console.error(e);
       setStatus("error");
     }
   }
+
+  useEffect(() => {
+    return () => {
+      if (tickIdRef.current) clearInterval(tickIdRef.current);
+    };
+  }, []);
 
   return (
     <main style={{ padding: 24 }}>
@@ -126,6 +259,16 @@ function GameInner() {
         <button onClick={openSession} disabled={!isConnected || status === "opening" || !currentAddress}>Open Session (budget 5 USD)</button>
         <button onClick={closeSession} disabled={!isConnected || status === "closing" || !currentAddress} style={{ marginLeft: 8 }}>Close Session</button>
         <div>Status: {status}</div>
+        {sessionId && <div style={{ fontSize: 12, color: "#555" }}>Session ID: <code>{sessionId}</code></div>}
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <div>Spent: ${spentUsd.toFixed(2)} / ${budgetUsd.toFixed(2)}</div>
+        <div style={{ width: 300, height: 10, background: "#eee", borderRadius: 6, overflow: "hidden" }}>
+          <div style={{ width: `${Math.min(100, (spentUsd / budgetUsd) * 100)}%`, height: "100%", background: "#7c3aed" }} />
+        </div>
+        <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+          Rate: {offer?.rateUsdPerSecond ? `$${offer.rateUsdPerSecond.toFixed(4)}/s` : offer?.rateUsdPerMinute ? `$${(offer.rateUsdPerMinute/60).toFixed(4)}/s` : "$0.0500/s"}
+        </div>
       </div>
       <div style={{ marginTop: 16 }}>
         <pre>{offer ? JSON.stringify(offer, null, 2) : "Loading offer..."}</pre>
