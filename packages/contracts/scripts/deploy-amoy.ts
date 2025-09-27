@@ -4,7 +4,14 @@ async function main() {
   const PaymentSession = await ethers.getContractFactory("PaymentSession");
   const contract = await PaymentSession.deploy();
   await contract.waitForDeployment();
-  console.log("PaymentSession (Amoy) deployed to:", await contract.getAddress());
+  const addr = await contract.getAddress();
+  console.log("PaymentSession (Amoy) deployed to:", addr);
+  try {
+    await (ethers as any).run("verify:verify", { address: addr, constructorArguments: [] });
+    console.log("Verified PaymentSession at", addr);
+  } catch (e) {
+    console.warn("Verify skipped/failed:", (e as any)?.message || e);
+  }
 }
 
 main().catch((error) => {
