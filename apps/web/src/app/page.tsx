@@ -32,26 +32,33 @@ function GameInner() {
   async function addAmoyNetwork() {
     if (!window.ethereum) return alert("Install MetaMask");
     try {
-      await (window.ethereum as any).request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: "0x13882", // 80002
-            chainName: "Polygon Amoy",
-            nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
-            rpcUrls: ["https://rpc-amoy.polygon.technology"],
-            blockExplorerUrls: ["https://www.oklink.com/amoy"]
-          }
-        ]
-      });
-      await (window.ethereum as any).request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: "0x13882" }]
-      });
+      await (window.ethereum as any).request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x13882" }] });
       alert("Switched to Polygon Amoy in MetaMask");
-    } catch (e) {
-      console.error(e);
-      alert("Failed to add network. Check console.");
+    } catch (switchErr: any) {
+      if (switchErr?.code === 4902) {
+        try {
+          await (window.ethereum as any).request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: "0x13882",
+                chainName: "Polygon Amoy",
+                nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
+                rpcUrls: ["https://rpc-amoy.polygon.technology"],
+                blockExplorerUrls: ["https://www.oklink.com/amoy"]
+              }
+            ]
+          });
+          await (window.ethereum as any).request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x13882" }] });
+          alert("Switched to Polygon Amoy in MetaMask");
+        } catch (addErr) {
+          console.error(addErr);
+          alert("Failed to add/switch network. Check console.");
+        }
+      } else {
+        console.error(switchErr);
+        alert("Failed to switch network. Check console.");
+      }
     }
   }
 

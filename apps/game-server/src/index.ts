@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import { WebSocketServer } from "ws";
 
 const fastify = Fastify({ logger: true });
@@ -14,6 +15,7 @@ fastify.get("/offer", async () => ({
 }));
 
 const start = async () => {
+  await fastify.register(cors, { origin: ["http://localhost:3000", "http://127.0.0.1:3000"] });
   await fastify.listen({ port: 4000, host: "0.0.0.0" });
   const server = (fastify.server as any);
   const wss = new WebSocketServer({ server });
