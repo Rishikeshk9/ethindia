@@ -5,6 +5,7 @@ import { injected } from "wagmi/connectors";
 import { formatEther } from "viem";
 import { createPublicClient, createWalletClient, custom, parseEther } from "viem";
 import { foundry } from "viem/chains";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PAYMENT_SESSION_ADDRESS, PAYMENT_SESSION_ABI } from "../config/contracts";
 
 const config = createConfig({
@@ -27,6 +28,28 @@ function GameInner() {
   useEffect(() => {
     fetch("http://localhost:4000/offer").then(r => r.json()).then(setOffer).catch(() => setOffer(null));
   }, []);
+
+  async function addAnvilNetwork() {
+    if (!window.ethereum) return alert("Install MetaMask");
+    try {
+      await (window.ethereum as any).request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: "0x7A69", // 31337
+            chainName: "Anvil Localhost",
+            nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+            rpcUrls: ["http://127.0.0.1:8545"],
+            blockExplorerUrls: []
+          }
+        ]
+      });
+      alert("Anvil network added to MetaMask");
+    } catch (e) {
+      console.error(e);
+      alert("Failed to add network. Check console.");
+    }
+  }
 
   async function openSession() {
     if (!window.ethereum) return alert("Install MetaMask");
@@ -79,6 +102,7 @@ function GameInner() {
         ) : (
           <button onClick={() => disconnect()}>Disconnect</button>
         )}
+        <button onClick={addAnvilNetwork} style={{ marginLeft: 8 }}>Add Anvil to MetaMask</button>
       </div>
       <div style={{ marginTop: 16 }}>
         <button onClick={openSession} disabled={!isConnected || status === "opening"}>Open Session (budget 5 USD)</button>
@@ -93,10 +117,13 @@ function GameInner() {
 }
 
 export default function Home() {
+  const queryClient = useMemo(() => new QueryClient(), []);
   return (
-    <WagmiConfig config={config}>
-      <GameInner />
-    </WagmiConfig>
+    <QueryClientProvider client={queryClient}>
+      <WagmiConfig config={config}>
+        <GameInner />
+      </WagmiConfig>
+    </QueryClientProvider>
   );
 }
 
