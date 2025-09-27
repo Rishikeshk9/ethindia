@@ -11,6 +11,8 @@ contract GameRegistry {
     }
 
     mapping(bytes32 => GameInfo) private gameIdToInfo;
+    mapping(bytes32 => bool) private gameIdExists;
+    bytes32[] public gameIds;
 
     event OwnerTransferred(address indexed prev, address indexed next);
     event GameUpdated(bytes32 indexed gameId, address indexed signer, bool enabled);
@@ -32,12 +34,20 @@ contract GameRegistry {
 
     function setGame(bytes32 gameId, address signer, bool enabled) external onlyOwner {
         require(gameId != bytes32(0), "gameId");
+        if (!gameIdExists[gameId]) {
+            gameIdExists[gameId] = true;
+            gameIds.push(gameId);
+        }
         gameIdToInfo[gameId] = GameInfo({ signer: signer, enabled: enabled });
         emit GameUpdated(gameId, signer, enabled);
     }
 
     function getGame(bytes32 gameId) external view returns (GameInfo memory) {
         return gameIdToInfo[gameId];
+    }
+
+    function getAllGames() external view returns (bytes32[] memory) {
+        return gameIds;
     }
 }
 

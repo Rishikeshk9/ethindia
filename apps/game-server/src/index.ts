@@ -1,25 +1,135 @@
+import dotenv from "dotenv";
+import path from "node:path";
+// Load env from current dir and monorepo root
+dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../../packages/contracts/.env") });
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { WebSocketServer } from "ws";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, http, toBytes, keccak256, createWalletClient } from "viem";
 import { polygonAmoy } from "viem/chains";
-import { PAYMENT_SESSION_ADDRESS, PAYMENT_SESSION_ABI, RPC_AMOY } from "./config";
+import { privateKeyToAccount } from "viem/accounts";
+import { PAYMENT_SESSION_ADDRESS, PAYMENT_SESSION_ABI, RPC_AMOY, USDC_ADDRESSES } from "./config";
+
+const ALL_GAMES = [
+  { id: "default.game", name: "Default Arena", priceUsdPerMinute: 0.03, token: "mUSDC" },
+  { id: "shooter.game", name: "Blaster Royale", priceUsdPerMinute: 0.10, token: "mUSDC" },
+  { id: "racer.game", name: "Turbo Racer", priceUsdPerMinute: 0.06, token: "mUSDC" }
+];
 
 const fastify = Fastify({ logger: true });
+const signerPriv = (process.env.GAME_SIGNER_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || "").trim();
+const signer = signerPriv ? privateKeyToAccount((signerPriv.startsWith("0x") ? signerPriv : ("0x" + signerPriv)) as `0x${string}`) : null;
 
 fastify.get("/health", async () => ({ ok: true }));
 
-// Simple 402 offer endpoint for demo
-fastify.get("/offer", async () => ({
-  origin: "match.demo",
-  priceUsdPerMinute: 0.03,
-  maxMinutes: 30,
-  assetSymbol: "USDC",
-  rateUsdPerSecond: 0.03 / 60
-}));
+fastify.post("/faucet", async (req, reply) => {
+  try {
+    if (!signer) return reply.code(500).send({ error: "server signer not configured" });
+    const { address } = (req as any).body || {};
+    if (!address || !address.startsWith("0x")) {
+      return reply.code(400).send({ error: "invalid address" });
+    }
+    const tokenAddress = USDC_ADDRESSES[polygonAmoy.id];
+    const walletClient = createWalletClient({ account: signer, chain: polygonAmoy, transport: http(RPC_AMOY) });
+    const hash = await walletClient.writeContract({
+      address: tokenAddress as `0x${string}`,
+      abi: [{ "inputs": [{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}], "name":"mint", "outputs":[], "stateMutability":"nonpayable", "type":"function" }] as any,
+      functionName: "mint",
+      args: [address, BigInt(100) * BigInt(10 ** 18)]
+    });
+    return { hash };
+  } catch (e: any) {
+    return reply.code(500).send({ error: String(e?.message || e) });
+  }
+});
+
+// EIP-712 Signed Offer endpoint
+fastify.get("/offer", async (req, reply) => {
+  try {
+    if (!signer) return reply.code(500).send({ error: "server signer not configured" });
+    const q: any = (req as any).query || {};
+    const gameIdRaw = String(q.gameId || "default.game");
+    const token = (q.token as string) || USDC_ADDRESSES[polygonAmoy.id];
+    const payee = (q.payee as string) || signer.address;
+    const now = Math.floor(Date.now() / 1000);
+    const expiry = BigInt(now + Number(q.expiry || 3600));
+    const nonce = BigInt(BigInt.asUintN(64, BigInt(now)) ^ BigInt(Math.floor(Math.random() * 1e9)));
+
+    // Budget/Rate in token units (derive from USD if needed)
+    const pc = createPublicClient({ chain: polygonAmoy, transport: http(RPC_AMOY) });
+    const decimals: number = await pc.readContract({
+      address: token as `0x${string}`,
+      abi: [{ inputs: [], name: "decimals", outputs: [{ internalType: "uint8", name: "", type: "uint8" }], stateMutability: "view", type: "function" }] as any,
+      functionName: "decimals",
+      args: []
+    }) as any;
+    let budget: bigint;
+    let ratePerSecond: bigint;
+    if (q.budgetTokens && q.rateTokensPerSecond) {
+      budget = BigInt(q.budgetTokens);
+      ratePerSecond = BigInt(q.rateTokensPerSecond);
+    } else {
+      const selectedGame = ALL_GAMES.find(g => g.id === gameIdRaw) || ALL_GAMES[0];
+      const budgetUsd = Number(q.budgetUsd || 5);
+      const rateUsdPerMinute = selectedGame.priceUsdPerMinute;
+      const rateUsdPerSecond = Number(q.rateUsdPerSecond || (rateUsdPerMinute / 60));
+      const scale = Math.pow(10, decimals);
+      budget = BigInt(Math.floor(budgetUsd * scale));
+      ratePerSecond = BigInt(Math.max(1, Math.floor(rateUsdPerSecond * scale)));
+    }
+
+    const gameId = gameIdRaw.startsWith("0x") && gameIdRaw.length === 66
+      ? (gameIdRaw as `0x${string}`)
+      : (keccak256(toBytes(gameIdRaw)) as `0x${string}`);
+
+    const domain = {
+      name: "PaymentSession",
+      version: "1",
+      chainId: polygonAmoy.id,
+      verifyingContract: PAYMENT_SESSION_ADDRESS as `0x${string}`
+    } as const;
+    const types = {
+      Offer: [
+        { name: "gameId", type: "bytes32" },
+        { name: "token", type: "address" },
+        { name: "payee", type: "address" },
+        { name: "budget", type: "uint256" },
+        { name: "ratePerSecond", type: "uint256" },
+        { name: "nonce", type: "uint256" },
+        { name: "expiry", type: "uint64" }
+      ]
+    } as const;
+    const offer = {
+      gameId,
+      token: token as `0x${string}`,
+      payee: payee as `0x${string}`,
+      budget,
+      ratePerSecond,
+      nonce,
+      expiry
+    } as const;
+    const sig = await signer.signTypedData({ domain, types, primaryType: "Offer", message: offer });
+    return {
+      offer: {
+        ...offer,
+        budget: offer.budget.toString(),
+        ratePerSecond: offer.ratePerSecond.toString(),
+        nonce: offer.nonce.toString(),
+        expiry: Number(offer.expiry)
+      },
+      sig
+    };
+  } catch (e: any) {
+    return reply.code(500).send({ error: String(e?.message || e) });
+  }
+});
 
 const subscribers = new Map<string, Set<any>>(); // key: user|sessionId -> set of ws
 const trackedByUser = new Map<string, Set<string>>(); // user -> set of sessionIds
+const sessionMeta = new Map<string, { gameId?: string }>(); // key -> metadata
 
 function makeKey(address: string, sessionId?: string) {
   return sessionId ? `${address.toLowerCase()}|${sessionId.toLowerCase()}` : address.toLowerCase();
@@ -32,6 +142,7 @@ function subscribe(address: string, ws: any, sessionId?: string) {
     const u = address.toLowerCase();
     if (!trackedByUser.has(u)) trackedByUser.set(u, new Set());
     trackedByUser.get(u)!.add(sessionId.toLowerCase());
+    sessionMeta.set(key, { gameId: undefined });
   }
 }
 function unsubscribe(ws: any) {
@@ -63,7 +174,8 @@ async function pollUser(address: `0x${string}`, sessionId: `0x${string}`) {
       args
     }) as unknown as [string, string, bigint, bigint, bigint, boolean];
     const active = session[5];
-    push(address, { type: "tick", active, spent: spent.toString(), elapsed: Number(elapsed), budget: budget.toString(), sessionId }, sessionId);
+    const meta = sessionMeta.get(makeKey(address, sessionId)) || {};
+    push(address, { type: "tick", active, spent: spent.toString(), elapsed: Number(elapsed), budget: budget.toString(), sessionId, gameId: meta.gameId }, sessionId);
   } catch (e) {
     // ignore
   }
@@ -91,6 +203,9 @@ const start = async () => {
             return;
           }
           subscribe(msg.address, ws, msg.sessionId);
+          const key = makeKey(msg.address, msg.sessionId);
+          const prev = sessionMeta.get(key) || {};
+          sessionMeta.set(key, { ...prev, gameId: typeof msg.gameId === "string" ? msg.gameId : prev.gameId });
           ws.send(JSON.stringify({ type: "subscribed", address: msg.address, sessionId: msg.sessionId }));
         } else if (msg?.type === "unsubscribe" && typeof msg.address === "string") {
           const key = makeKey(msg.address, msg.sessionId);
@@ -122,7 +237,9 @@ fastify.get("/session", async (req, reply) => {
     const [spent, elapsed, budget] = await pc.readContract({ address: PAYMENT_SESSION_ADDRESS as `0x${string}`, abi: PAYMENT_SESSION_ABI as any, functionName: "getAccrued", args }) as unknown as [bigint, bigint, bigint];
     const session = await pc.readContract({ address: PAYMENT_SESSION_ADDRESS as `0x${string}`, abi: PAYMENT_SESSION_ABI as any, functionName: "getSession", args }) as unknown as [string, string, bigint, bigint, bigint, boolean];
     const [token, payee, sbudget, ratePerSecond, startedAt, active] = session;
-    return { address, sessionId, active, token, payee, budget: sbudget.toString(), ratePerSecond: ratePerSecond.toString(), startedAt: Number(startedAt), spent: spent.toString(), elapsed: Number(elapsed) };
+    const key = makeKey(address, sessionId);
+    const meta = sessionMeta.get(key) || {};
+    return { address, sessionId, gameId: meta.gameId, active, token, payee, budget: sbudget.toString(), ratePerSecond: ratePerSecond.toString(), startedAt: Number(startedAt), spent: spent.toString(), elapsed: Number(elapsed) };
   } catch (e: any) {
     return reply.code(500).send({ error: String(e?.message || e) });
   }

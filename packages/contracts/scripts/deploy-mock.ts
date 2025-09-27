@@ -1,10 +1,13 @@
 import { ethers } from "hardhat";
 
 async function main() {
+  const [deployer] = await ethers.getSigners();
+  console.log("Deployer:", deployer.address);
+
   const MockUSDC = await ethers.getContractFactory("MockUSDC");
-  const token = await MockUSDC.deploy();
-  await token.waitForDeployment();
-  const addr = await token.getAddress();
+  const musdc = await MockUSDC.deploy();
+  await musdc.waitForDeployment();
+  const addr = await musdc.getAddress();
   console.log("MockUSDC deployed to:", addr);
   try {
     await (ethers as any).run("verify:verify", { address: addr, constructorArguments: [] });

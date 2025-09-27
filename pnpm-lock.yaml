@@ -13,6 +13,9 @@ importers:
       '@fastify/cors':
         specifier: ^9.0.1
         version: 9.0.1
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
       fastify:
         specifier: ^4.26.2
         version: 4.29.1

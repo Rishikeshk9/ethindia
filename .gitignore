@@ -38,3 +38,5 @@ typechain-types/
 # TS
 tsconfig.tsbuildinfo
 
+.env
+**/.env
