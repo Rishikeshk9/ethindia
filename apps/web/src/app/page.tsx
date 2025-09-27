@@ -109,7 +109,6 @@ function GameInner() {
     }
   }
 
-  const currentAddress = ADDRESSES[foundry.id];
   return (
     <main style={{ padding: 24 }}>
       <h1>Match402</h1>
@@ -125,7 +124,7 @@ function GameInner() {
       </div>
       <div style={{ marginTop: 16 }}>
         <button onClick={openSession} disabled={!isConnected || status === "opening" || !currentAddress}>Open Session (budget 5 USD)</button>
-        <button onClick={closeSession} disabled={!isConnected || status === "closing"} style={{ marginLeft: 8 }}>Close Session</button>
+        <button onClick={closeSession} disabled={!isConnected || status === "closing" || !currentAddress} style={{ marginLeft: 8 }}>Close Session</button>
         <div>Status: {status}</div>
       </div>
       <div style={{ marginTop: 16 }}>
