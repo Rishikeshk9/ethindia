@@ -8,14 +8,17 @@
     "lint": "echo 'no lint'",
     "dev": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
-    "deploy:amoy": "hardhat run scripts/deploy-amoy.ts --network amoy"
+    "deploy:amoy": "hardhat run scripts/deploy-amoy.ts --network amoy",
+    "deploy:mock:local": "hardhat run scripts/deploy-mock.ts --network localhost",
+    "deploy:mock:amoy": "hardhat run scripts/deploy-mock.ts --network amoy"
   },
   "devDependencies": {
     "hardhat": "^2.22.5",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "typescript": "^5.4.0",
     "ts-node": "^10.9.2",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "@openzeppelin/contracts": "^5.0.2"
   }
 }
 
